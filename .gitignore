@@ -1,0 +1,11 @@
+# 실행 중에 생기는 것들
+logs/
+state.json
+
+# 빌드 산출물
+bin/watchdog-menubar
+*.o
+*.dSYM/
+
+# macOS
+.DS_Store
