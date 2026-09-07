@@ -1,0 +1,9 @@
+ ▐▛███▛█   Claude Code v2.1.261
+❯ 리팩터링 계속 해줘
+✗ Usage limit reached · resets 3am
+   What do you want to do?
+   ❯ 1. Stop and wait for limit to reset
+     2. Wait here, then continue automatically at 3am
+     3. Switch to usage credits
+     4. Upgrade your plan
+   Enter to confirm · Esc to cancel

@@ -1,0 +1,4 @@
+❯ 리팩터링 계속 해줘
+✗ Usage limit reached
+⏺ 파일을 읽는 중…
+✳ Spinning… (12s · esc to interrupt)

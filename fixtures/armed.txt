@@ -1,0 +1,6 @@
+ ▐▛███▛█   Claude Code v2.1.261
+❯ 리팩터링 계속 해줘
+⏺ 세 파일을 수정했습니다.
+✳ Usage limit reached · continuing automatically when it resets · esc to cancel
+────────────────────────────────────────
+❯

@@ -1,0 +1,10 @@
+ ▐▛███▛█   Claude Code v2.1.261
+▝▜██████▀  Opus 5 · Claude Max
+❯ 리팩터링 계속 해줘
+⏺ 세 파일을 수정했습니다.
+✗ Usage limit reached
+  /upgrade to increase your usage limit.
+────────────────────────────────────────
+❯
+────────────────────────────────────────
+  session:2h | ctx:[####------]41%

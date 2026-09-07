@@ -1,0 +1,8 @@
+❯ 워치독이 Usage limit reached 를 어떻게 감지하는지 설명해줘
+⏺ 화면에서 Usage limit reached 문자열을 찾습니다. 이 문구가 뜨면 한도에 걸린 것으로 봅니다.
+  ⎿  Usage limit reached 는 Claude Code 가 5시간 한도에 도달했을 때 출력하는 배너입니다.
+✻ Worked for 4s · done 02:12 AM
+────────────────────────────────────────
+❯
+────────────────────────────────────────
+  session:1h | ctx:[##--------]18%
