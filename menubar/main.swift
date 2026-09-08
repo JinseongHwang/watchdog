@@ -49,6 +49,7 @@ struct LogEntry {
     let time: Date
     let kind: String      // STUCK, MENU, ARMED, OK, SKIP, FAIL, WARN
     let message: String
+    let isToday: Bool
 
     /// 로그 본문은 "<터미널 이름> — <설명>" 꼴이다. 종류 라벨이 이미 무슨 일인지 말해주므로
     /// 메뉴에는 대상 이름만 보여준다. 자세한 내용은 일지 파일에 그대로 남아 있다.
@@ -98,6 +99,7 @@ struct WatchdogStatus {
     var lastScanEnd: Date?
     var sessionCount: Int?
     var actionsToday = 0
+    var scansToday = 0
     var recent: [LogEntry] = []
     var logFile: URL?
 
@@ -207,13 +209,16 @@ enum StatusReader {
             }
             if rest.hasPrefix("점검 완료") {
                 s.lastScanEnd = time
-                if isToday, let n = firstInteger(in: rest) { s.actionsToday += n }
+                if isToday {
+                    s.scansToday += 1
+                    if let n = firstInteger(in: rest) { s.actionsToday += n }
+                }
                 continue
             }
             let kinds = ["STUCK", "MENU", "ARMED", "OK", "SKIP", "FAIL", "WARN"]
             if let kind = kinds.first(where: { rest.hasPrefix($0) }) {
                 let msg = rest.dropFirst(kind.count).trimmingCharacters(in: .whitespaces)
-                entries.append(LogEntry(time: time, kind: kind, message: msg))
+                entries.append(LogEntry(time: time, kind: kind, message: msg, isToday: isToday))
             }
         }
         s.recent = Array(entries.suffix(Config.recentLogLines))
@@ -234,6 +239,14 @@ enum StatusReader {
 func shortTime(_ date: Date) -> String {
     let f = DateFormatter()
     f.dateFormat = "HH:mm:ss"
+    f.locale = Locale(identifier: "en_US_POSIX")
+    return f.string(from: date)
+}
+
+/// 오늘이 아닌 기록에 붙일 표기. 날짜가 없으면 어제 일이 오늘 일처럼 보인다.
+func dayTime(_ date: Date) -> String {
+    let f = DateFormatter()
+    f.dateFormat = "MM-dd HH:mm:ss"
     f.locale = Locale(identifier: "en_US_POSIX")
     return f.string(from: date)
 }
@@ -294,7 +307,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         print("  마지막 점검 종료: \(status.lastScanEnd.map(shortTime) ?? "없음")")
         print("  감시 세션 수: \(status.sessionCount.map(String.init) ?? "없음")")
         print("  오늘 조치: \(status.actionsToday)건")
-        print("  최근 로그 항목: \(status.recent.count)건")
+        print("  최근 로그 항목: \(status.recent.count)건 " +
+              "(오늘 \(status.recent.filter { $0.isToday }.count)건, " +
+              "이전 \(status.recent.filter { !$0.isToday }.count)건)")
+        print("  오늘 순찰 횟수: \(status.scansToday)번")
         print("  건강 상태: \(headline())")
         print("  로그 파일: \(status.logFile?.lastPathComponent ?? "없음")")
         // 갓 설치해서 아직 한 번도 안 돌았으면 로그가 없는 게 정상이다. 실패가 아니라 안내로 다룬다.
@@ -403,10 +419,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // 최근 활동을 하위 메뉴로 감추지 않고 바로 펼쳐 보여준다.
         addHeader("🐾  최근 발자국")
-        if status.recent.isEmpty {
-            addRow("🌙", "", "아직 남긴 발자국이 없어요")
+        let todayEntries = status.recent.filter { $0.isToday }
+        let olderEntries = status.recent.filter { !$0.isToday }
+
+        if todayEntries.isEmpty {
+            // 조치할 일이 없는 날에는 기록이 남지 않는다. 그것 자체가 좋은 소식이므로
+            // 빈칸으로 두지 말고 오늘 몇 번 돌았는지 말해준다.
+            let summary = status.scansToday == 0
+                ? "오늘 첫 순찰은 아직이에요"
+                : "순찰 \(status.scansToday)번 모두 이상 없었어요"
+            addRow("🌙", "오늘은 조용해요", summary)
         } else {
-            for e in status.recent.reversed() { addLogLine(e) }
+            for e in todayEntries.reversed() { addLogLine(e) }
+        }
+
+        if !olderEntries.isEmpty {
+            addSubHeader("이전 기록")
+            for e in olderEntries.reversed() { addLogLine(e) }
         }
 
         // 실제로 무언가를 실행하는 항목이므로 비유를 빼고 하는 일을 그대로 적는다.
@@ -446,6 +475,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         headerLabel = label
     }
 
+    private func addSubHeader(_ title: String) {
+        let text = "  \(title)"
+        let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+        item.attributedTitle = NSAttributedString(
+            string: text,
+            attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                         .foregroundColor: NSColor.tertiaryLabelColor])
+        item.isEnabled = false
+        menu.addItem(item)
+    }
+
     private func addHeader(_ title: String) {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.attributedTitle = NSAttributedString(
@@ -479,7 +519,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 로그 한 줄. 시각과 종류를 등폭으로 맞춰 세로로 정렬되게 한다.
     private func addLogLine(_ e: LogEntry) {
         let kind = e.kindLabel.padding(toLength: 6, withPad: " ", startingAt: 0)
-        let title = "  \(e.icon)  \(shortTime(e.time))  \(kind)   \(truncate(e.target, 44))"
+        let stamp = e.isToday ? shortTime(e.time) : dayTime(e.time)
+        let title = "  \(e.icon)  \(stamp)  \(kind)   \(truncate(e.target, 44))"
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.attributedTitle = NSAttributedString(
             string: title,
