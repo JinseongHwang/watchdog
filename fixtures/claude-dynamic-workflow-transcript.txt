@@ -1,0 +1,7 @@
+❯ "You've hit your session limit" 경고를 어떻게 감지하나요?
+⏺ 화면 문자열만 믿지 않고, 실제 상태 배너의 모양을 함께 확인합니다.
+  ⎿  You've hit your session limit · resets 3:40am (Asia/Seoul)
+     /upgrade to increase your usage limit.
+✻ Worked for 4s · done 01:08 AM
+────────────────────────────────────────
+❯

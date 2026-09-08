@@ -53,6 +53,7 @@ echo "== 오탐 방지 =="
 check "실제 대화 화면 (회귀)"        "$FIX/false-positive-transcript.txt" NONE
 check "마커를 말로만 언급"            "$FIX/prose-mention.txt"             NONE
 check "위로 밀려난 옛 배너"           "$FIX/scrolled-away.txt"             NONE
+check "동적 워크플로 대화 인용은 제외" "$FIX/claude-dynamic-workflow-transcript.txt" NONE
 
 echo
 echo "== 한도 재설정 시각 게이트 =="
@@ -60,6 +61,10 @@ sed "s/Usage limit reached/Usage limit reached · resets $(rel_time 90)/" "$FIX/
 sed "s/Usage limit reached/Usage limit reached · resets $(rel_time -90)/" "$FIX/stuck.txt" > "$TMP/past.txt"
 check "재설정 전이면 기다림"        "$TMP/future.txt"           NONE
 check "재설정 후면 재개"            "$TMP/past.txt"             STUCK
+sed "s/3:40am/$(rel_time 90)/" "$FIX/claude-dynamic-workflow-limit.txt" > "$TMP/workflow-future.txt"
+sed "s/3:40am/$(rel_time -90)/" "$FIX/claude-dynamic-workflow-limit.txt" > "$TMP/workflow-past.txt"
+check "워크플로 재설정 전이면 기다림" "$TMP/workflow-future.txt" NONE
+check "워크플로 재설정 후면 재개"   "$TMP/workflow-past.txt"   STUCK
 
 echo
 echo "합계: PASS=$PASS FAIL=$FAIL"

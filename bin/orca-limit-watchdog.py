@@ -40,6 +40,16 @@ LIMIT_MARKERS = (
     "usage limit reached",
     "Claude usage limit reached",
     "You've hit your monthly spend limit",
+    "You've hit your session limit",
+)
+
+# Claude Code의 동적 워크플로 한도 안내는 작업 상태의 자식 줄(⎿)로 그려진다. 이 줄은
+# 일반 대화의 인용 줄과 모양이 같으므로, 상위 "Dynamic workflow" 상태와 /upgrade 안내까지
+# 함께 있을 때만 화면 문자열만으로 인정한다.
+WORKFLOW_SESSION_LIMIT_MARKER = "You've hit your session limit"
+WORKFLOW_UPGRADE_HINT = "/upgrade to increase your usage limit."
+WORKFLOW_STATUS_RE = re.compile(
+    r"^[●•⏺]\s+Dynamic workflow\b.*\b(?:completed|failed|stopped)\b", re.IGNORECASE,
 )
 
 # Claude Code 가 이미 알아서 이어가기로 예약해 둔 상태의 표지.
@@ -157,11 +167,35 @@ def starts_with_marker(bodies: list[str], markers: tuple[str, ...]) -> bool:
     return any(body.startswith(m) for body in bodies for m in markers)
 
 
+def workflow_limit_bodies(screen: str) -> list[str]:
+    """Claude Code 작업 상태 트리에 붙는 실제 한도 배너 본문만 돌려준다.
+
+    `⎿`는 일반 대화 인용에도 쓰이므로 단독으로 신뢰하지 않는다.
+    바로 위의 workflow 상태와 다음 줄의 업그레이드 안내가 모두 맞을 때만 허용한다.
+    """
+    lines = screen.splitlines()[-TAIL_REGION_LINES:]
+    bodies = []
+    for idx, raw in enumerate(lines):
+        line = raw.strip()
+        if not line.startswith(("⎿", "└")):
+            continue
+        body = line[1:].lstrip()
+        if not body.startswith(WORKFLOW_SESSION_LIMIT_MARKER):
+            continue
+
+        previous = next((item.strip() for item in reversed(lines[:idx]) if item.strip()), "")
+        following = next((item.strip() for item in lines[idx + 1:] if item.strip()), "")
+        if WORKFLOW_STATUS_RE.match(previous) and following.startswith(WORKFLOW_UPGRADE_HINT):
+            bodies.append(body)
+    return bodies
+
+
 def classify(screen: str, draft: str) -> tuple[str, dict]:
     """화면 텍스트를 보고 어떤 상태인지 판정한다."""
     info: dict = {}
 
     bodies = banner_bodies(screen)
+    bodies.extend(workflow_limit_bodies(screen))
     has_limit = starts_with_marker(bodies, LIMIT_MARKERS)
     has_cancelled = starts_with_marker(bodies, CANCELLED_MARKERS)
 
