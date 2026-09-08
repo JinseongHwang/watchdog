@@ -292,13 +292,6 @@ func durationText(_ seconds: TimeInterval) -> String {
     return "\(hours / 24)일 \(hours % 24)시간"
 }
 
-func relative(_ date: Date) -> String {
-    let secs = Int(Date().timeIntervalSince(date))
-    if secs < 60 { return "\(secs)초 전" }
-    if secs < 3600 { return "\(secs / 60)분 전" }
-    return "\(secs / 3600)시간 전"
-}
-
 // MARK: - 앱
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -436,27 +429,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         addStatusHeader("\(faceEmoji)  \(headline())", color: stateColor)
 
         if status.registered {
-            // 시작 줄만 보면 터미널이 없어 조용히 지나간 순찰을 통째로 놓친다.
-            // 컴퓨터를 껐다 켠 직후처럼 볼 세션이 없을 때 마지막 순찰 시각이 옛날에 멈춰 있었다.
-            if let start = status.lastScanEnd ?? status.lastScanStart {
-                addRow("🕐", "마지막 순찰", "\(shortTime(start))  ·  \(relative(start))")
-                let next = start.addingTimeInterval(Double(status.intervalSeconds))
-                addRow("⏭️", "다음 순찰", next > Date()
-                       ? "\(shortTime(next))  ·  약 \(max(1, Int(next.timeIntervalSinceNow) / 60))분 뒤"
-                       : "곧 나갑니다")
-            } else {
-                addRow("🕐", "마지막 순찰", "오늘은 아직 안 돌았어요")
-            }
+            // 마지막 순찰 시각과 다음 순찰 예정, 실행 횟수, 종료 코드는 빼기로 했다.
+            // 바로 아래 순찰 기록에 같은 내용이 더 자세히 나오고, 순찰이 늦거나 오류로
+            // 끝난 사실은 맨 위 상태 문구가 이미 알려준다. 줄이 길어지면 정작 볼 것이 묻힌다.
             addRow("🔁", "순찰 주기", "\(status.intervalSeconds / 60)분마다")
             if let n = status.sessionCount {
                 addRow("👀", "지켜보는 세션", n == 0 ? "지금은 없어요" : "\(n)개")
             }
             addRow("🦴", "오늘 구조한 횟수", status.actionsToday == 0 ? "아직 없어요" : "\(status.actionsToday)번")
-            if let code = status.lastExitCode {
-                addRow(code == 0 ? "💚" : "💔", "마지막 순찰 결과",
-                       code == 0 ? "무사히 다녀왔어요" : "오류로 끝났어요 (코드 \(code))")
-            }
-            addRow("🐾", "지금까지 순찰", "\(status.runs)번")
         } else {
             addRow("💤", "지금 상태", "잠들어 있어요. 아래에서 깨워주세요")
         }
