@@ -48,7 +48,7 @@ func shell(_ command: String, timeout: TimeInterval = 10) -> (out: String, statu
 
 struct LogEntry {
     let time: Date
-    let kind: String      // STUCK, MENU, ARMED, OK, SKIP, FAIL, WARN
+    let kind: String      // STUCK, MENU, ARMED, WAIT, OK, SKIP, FAIL, WARN
     let message: String
     let isToday: Bool
 
@@ -68,6 +68,7 @@ struct LogEntry {
         case "STUCK": return "🚨"   // 멈춘 세션 발견
         case "MENU":  return "🎯"   // 메뉴에서 골라줌
         case "ARMED": return "😌"   // 이미 예약돼 있어 안심
+        case "WAIT":  return "⏳"   // 한도 재설정 대기
         case "SKIP":  return "😴"   // 쿨다운, 잠깐 쉼
         case "FAIL":  return "💔"
         case "WARN":  return "⚠️"
@@ -80,6 +81,7 @@ struct LogEntry {
         case "STUCK": return "멈춤 발견"
         case "MENU":  return "메뉴 선택"
         case "ARMED": return "예약됨"
+        case "WAIT":  return "한도 대기"
         case "SKIP":  return "쉬는 중"
         case "FAIL":  return "실패"
         case "WARN":  return "경고"
@@ -246,7 +248,7 @@ enum StatusReader {
                 }
                 continue
             }
-            let kinds = ["STUCK", "MENU", "ARMED", "OK", "SKIP", "FAIL", "WARN"]
+            let kinds = ["STUCK", "MENU", "ARMED", "WAIT", "OK", "SKIP", "FAIL", "WARN"]
             if let kind = kinds.first(where: { rest.hasPrefix($0) }) {
                 let msg = rest.dropFirst(kind.count).trimmingCharacters(in: .whitespaces)
                 entries.append(LogEntry(time: time, kind: kind, message: msg, isToday: isToday))
@@ -623,7 +625,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func summarize(_ out: String) -> String {
         let lines = out.split(separator: "\n").map(String.init)
         let interesting = lines.filter {
-            $0.contains("STUCK") || $0.contains("MENU") || $0.contains("OK ") || $0.contains("FAIL")
+            $0.contains("STUCK") || $0.contains("MENU") || $0.contains("WAIT") || $0.contains("OK ") || $0.contains("FAIL")
         }
         if let last = (interesting.last ?? lines.last(where: { $0.contains("점검 완료") })) {
             return String(last.dropFirst(min(20, last.count)))

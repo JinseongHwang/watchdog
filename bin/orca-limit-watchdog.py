@@ -3,10 +3,11 @@
 
 한 번 실행하면 살아 있는 모든 Claude 터미널을 한 바퀴 훑고 끝난다. 주기 실행은 launchd 가 맡는다.
 
-감지 결과는 네 가지다.
+감지 결과는 다섯 가지다.
   ARMED  Claude Code 가 이미 자동 재개를 예약해 둔 상태다. 건드리지 않는다.
   MENU   한도 옵션 메뉴가 떠 있다. "Wait here, then continue automatically" 항목을 골라준다.
   STUCK  한도에 걸린 채 아무 예약 없이 멈춰 있다. 프롬프트를 넣어 재개시킨다.
+  WAIT   한도는 감지됐지만 아직 재설정 전이다. 시각을 기록하고 기다린다.
   NONE   한도와 무관한 상태다.
 """
 
@@ -233,7 +234,7 @@ def classify(screen: str, draft: str) -> tuple[str, dict]:
         info["reset_at"] = reset_at.isoformat(timespec="minutes")
         if datetime.now() < reset_at:
             info["reason"] = f"아직 한도 재설정 전 (재설정 {reset_at:%H:%M})"
-            return "NONE", info
+            return "WAIT", info
 
     return "STUCK", info
 
@@ -384,6 +385,9 @@ def main() -> int:
         label = t.get("title") or t.get("worktreePath") or handle
 
         if verdict == "NONE":
+            continue
+        if verdict == "WAIT":
+            log(f"WAIT   {label} — {info['reason']}. 재설정 뒤 다음 순찰에서 재개합니다.")
             continue
         if verdict == "ARMED":
             log(f"ARMED  {label} — Claude Code 가 이미 자동 재개를 예약해 두었습니다. 넘어갑니다.")

@@ -59,11 +59,11 @@ echo
 echo "== 한도 재설정 시각 게이트 =="
 sed "s/Usage limit reached/Usage limit reached · resets $(rel_time 90)/" "$FIX/stuck.txt" > "$TMP/future.txt"
 sed "s/Usage limit reached/Usage limit reached · resets $(rel_time -90)/" "$FIX/stuck.txt" > "$TMP/past.txt"
-check "재설정 전이면 기다림"        "$TMP/future.txt"           NONE
+check "재설정 전이면 기록하고 기다림" "$TMP/future.txt"           WAIT
 check "재설정 후면 재개"            "$TMP/past.txt"             STUCK
 sed "s/3:40am/$(rel_time 90)/" "$FIX/claude-dynamic-workflow-limit.txt" > "$TMP/workflow-future.txt"
 sed "s/3:40am/$(rel_time -90)/" "$FIX/claude-dynamic-workflow-limit.txt" > "$TMP/workflow-past.txt"
-check "워크플로 재설정 전이면 기다림" "$TMP/workflow-future.txt" NONE
+check "워크플로 재설정 전이면 기록하고 기다림" "$TMP/workflow-future.txt" WAIT
 check "워크플로 재설정 후면 재개"   "$TMP/workflow-past.txt"   STUCK
 
 echo
