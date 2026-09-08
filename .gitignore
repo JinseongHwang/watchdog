@@ -1,6 +1,7 @@
 # 실행 중에 생기는 것들
 logs/
 state.json
+.watchdog.lock
 
 # 에이전트 도구가 만드는 작업 상태
 .omc/

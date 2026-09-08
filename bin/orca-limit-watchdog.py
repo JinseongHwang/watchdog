@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -31,6 +32,7 @@ BIN_DIR = HOME_DIR / "bin"
 LOG_DIR = HOME_DIR / "logs"
 SENDER = str(BIN_DIR / "orca-send-prompt.sh")
 STATE_FILE = HOME_DIR / "state.json"
+LOCK_FILE = HOME_DIR / ".watchdog.lock"
 
 # 로그는 하루 단위로 파일을 새로 만들고, 오래된 것은 지운다.
 LOG_RETENTION_DAYS = 30
@@ -113,6 +115,22 @@ def log(msg: str) -> None:
     print(line, flush=True)
     with log_path().open("a", encoding="utf-8") as fh:
         fh.write(line + "\n")
+
+
+def acquire_run_lock():
+    """동시에 들어온 순찰을 건너뛴다.
+
+    launchd 주기와 메뉴바의 '지금 점검'이 겹치면 같은 세션을 두 번 읽고 조치할 수 있다.
+    잠금을 얻은 파일 객체는 호출자가 실행이 끝날 때까지 유지해야 한다.
+    """
+    HOME_DIR.mkdir(parents=True, exist_ok=True)
+    handle = LOCK_FILE.open("a", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    return handle
 
 
 def orca(*args: str) -> dict | None:
@@ -364,6 +382,22 @@ def main() -> int:
         print(json.dumps({"verdict": verdict, **info}, ensure_ascii=False))
         return 0
 
+    # 주기 실행과 수동 점검은 같은 순찰이다. 이미 다른 실행이 한 바퀴를 도는 중이면
+    # 두 번째 실행은 파일 순찰 기록을 남기지 않는다.
+    lock = acquire_run_lock()
+    if lock is None:
+        # 메뉴바의 수동 점검은 결과를 알림으로 보여 주므로, 파일 일지에는 남기지 않되
+        # 호출자에게는 왜 실행하지 않았는지 돌려준다.
+        print(f"{datetime.now().isoformat(timespec='seconds')} 점검 생략 — 다른 순찰이 이미 진행 중입니다.")
+        return 0
+    try:
+        return run_patrol(args)
+    finally:
+        lock.close()
+
+
+def run_patrol(args: argparse.Namespace) -> int:
+    """잠금을 가진 한 프로세스가 Claude 터미널을 한 바퀴 점검한다."""
     prune_logs()
 
     terminals = claude_terminals(args.terminal)

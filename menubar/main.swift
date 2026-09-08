@@ -20,7 +20,7 @@ enum Config {
     static var watchdogScript: URL { home.appendingPathComponent("bin/orca-limit-watchdog.py") }
     static let python = "/usr/bin/python3"
     static let refreshInterval: TimeInterval = 15
-    static let recentHistory = 12 // 순찰 기록과 눈여겨볼 일의 공통 원본
+    static let recentPatrols = 12 // 순찰 기록과 눈여겨볼 일의 공통 원본
 }
 
 // MARK: - 셸 실행
@@ -47,21 +47,9 @@ func shell(_ command: String, timeout: TimeInterval = 10) -> (out: String, statu
 
 struct LogEntry {
     let time: Date
-    let kind: String      // SCAN, STUCK, MENU, ARMED, WAIT, OK, SKIP, FAIL, WARN
+    let kind: String      // STUCK, MENU, ARMED, WAIT, OK, SKIP, FAIL, WARN
     let message: String
     let isToday: Bool
-    let sessions: Int?
-    let actions: Int?
-
-    init(time: Date, kind: String, message: String, isToday: Bool,
-         sessions: Int? = nil, actions: Int? = nil) {
-        self.time = time
-        self.kind = kind
-        self.message = message
-        self.isToday = isToday
-        self.sessions = sessions
-        self.actions = actions
-    }
 
     /// 로그 본문은 "<터미널 이름> — <설명>" 꼴이다. 종류 라벨이 이미 무슨 일인지 말해주므로
     /// 메뉴에는 대상 이름만 보여준다. 자세한 내용은 일지 파일에 그대로 남아 있다.
@@ -75,9 +63,6 @@ struct LogEntry {
 
     var icon: String {
         switch kind {
-        case "SCAN":
-            if (actions ?? 0) > 0 { return "🦴" }
-            return (sessions ?? 0) == 0 ? "🌙" : "🐾"
         case "OK":    return "🦴"   // 구했다, 간식 하나
         case "STUCK": return "🚨"   // 멈춘 세션 발견
         case "MENU":  return "🎯"   // 메뉴에서 골라줌
@@ -91,9 +76,6 @@ struct LogEntry {
     }
     var kindLabel: String {
         switch kind {
-        case "SCAN":
-            if let actions, actions > 0 { return "조치 \(actions)건" }
-            return (sessions ?? 0) == 0 ? "볼 것 없음" : "이상 없음"
         case "OK":    return "구조 완료"
         case "STUCK": return "멈춤 발견"
         case "MENU":  return "메뉴 선택"
@@ -105,18 +87,36 @@ struct LogEntry {
         default:      return kind
         }
     }
+    var isAction: Bool { kind == "OK" || kind == "STUCK" || kind == "MENU" }
+}
+
+/// 한 순찰의 완료 로그와 그 사이에 생긴 예외 로그를 묶은 한 행.
+struct PatrolRecord {
+    let time: Date
+    let sessions: Int
+    let actions: Int
+    let isToday: Bool
+    let events: [LogEntry]
+
+    /// 한 순찰 안에서 마지막으로 기록된 상태가 최종 결과다. 예를 들어 STUCK 뒤 OK가
+    /// 오면 "구조 완료"로 보여 주되, 원본 이벤트는 순찰 일지 파일에 모두 남아 있다.
+    var finalEvent: LogEntry? { events.last }
+    var icon: String {
+        if let event = finalEvent { return event.icon }
+        if actions > 0 { return "🦴" }
+        return sessions == 0 ? "🌙" : "🐾"
+    }
+    var kindLabel: String {
+        if let event = finalEvent { return event.kindLabel }
+        if actions > 0 { return "조치 \(actions)건" }
+        return sessions == 0 ? "볼 것 없음" : "이상 없음"
+    }
     var detail: String {
-        if kind == "SCAN" {
-            guard let sessions, sessions > 0 else { return "" }
-            return "세션 \(sessions)개"
-        }
-        return target
+        if let event = finalEvent { return event.target }
+        return sessions == 0 ? "" : "세션 \(sessions)개"
     }
-    var isAction: Bool {
-        kind == "OK" || kind == "STUCK" || kind == "MENU" ||
-        (kind == "SCAN" && (actions ?? 0) > 0)
-    }
-    var isNoteworthy: Bool { kind != "SCAN" }
+    var isAction: Bool { finalEvent?.isAction == true || actions > 0 }
+    var isNoteworthy: Bool { !events.isEmpty }
 }
 
 // MARK: - 수집한 상태
@@ -131,8 +131,8 @@ struct WatchdogStatus {
     var sessionCount: Int?
     var actionsToday = 0
     var scansToday = 0
-    var history: [LogEntry] = []
-    var noteworthy: [LogEntry] = []
+    var patrols: [PatrolRecord] = []
+    var noteworthy: [PatrolRecord] = []
     var logFile: URL?
 
     /// 마지막 점검이 주기의 2.5배를 넘겼으면 뭔가 잘못된 것으로 본다.
@@ -145,7 +145,9 @@ struct WatchdogStatus {
     var hasFailure: Bool {
         if let code = lastExitCode, code != 0 { return true }
         let window = Double(intervalSeconds) * 2
-        return noteworthy.contains { $0.kind == "FAIL" && Date().timeIntervalSince($0.time) < window }
+        return noteworthy.contains {
+            $0.events.contains { $0.kind == "FAIL" } && Date().timeIntervalSince($0.time) < window
+        }
     }
     enum Health { case healthy, stopped, warning }
     var health: Health {
@@ -212,8 +214,16 @@ enum StatusReader {
         }
         guard !sources.isEmpty else { return }
 
-        var history: [LogEntry] = []
-        var pendingSessions: Int?
+        // 한 번의 "점검 시작"부터 "점검 완료"까지가 메뉴의 한 행이다. 그 사이의
+        // STUCK/WAIT 같은 이벤트를 별도 행으로 쌓으면 정상 점검과 중복돼 보인다.
+        var patrols: [PatrolRecord] = []
+        // 예전 로그에는 수동 점검과 launchd 점검이 겹쳐 "시작, 이벤트, 시작"처럼
+        // 끼어든 적이 있다. 스택으로 읽으면 그런 기존 기록도 각 순찰로 보존한다.
+        struct PendingPatrol {
+            let sessions: Int
+            var events: [LogEntry]
+        }
+        var pendingPatrols: [PendingPatrol] = []
         var lines: [String] = []
         for url in sources {
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
@@ -237,19 +247,20 @@ enum StatusReader {
 
             if rest.hasPrefix("점검 시작") {
                 s.lastScanStart = time
-                pendingSessions = firstInteger(in: rest)
-                if let n = pendingSessions { s.sessionCount = n }
+                let sessions = firstInteger(in: rest) ?? 0
+                pendingPatrols.append(PendingPatrol(sessions: sessions, events: []))
+                s.sessionCount = sessions
                 continue
             }
             if rest.hasPrefix("점검 완료") {
                 s.lastScanEnd = time
                 // "검사할 Claude 터미널이 없습니다" 로 끝나면 조치 수가 적히지 않는다.
                 let acted = rest.contains("조치") ? (firstInteger(in: rest) ?? 0) : 0
-                let seen = pendingSessions ?? 0
+                let pending = pendingPatrols.popLast()
+                let seen = pending?.sessions ?? 0
                 s.sessionCount = seen
-                history.append(LogEntry(time: time, kind: "SCAN", message: "", isToday: isToday,
-                                        sessions: seen, actions: acted))
-                pendingSessions = nil
+                patrols.append(PatrolRecord(time: time, sessions: seen, actions: acted,
+                                            isToday: isToday, events: pending?.events ?? []))
                 if isToday {
                     s.scansToday += 1
                     s.actionsToday += acted
@@ -257,13 +268,14 @@ enum StatusReader {
                 continue
             }
             let kinds = ["STUCK", "MENU", "ARMED", "WAIT", "OK", "SKIP", "FAIL", "WARN"]
-            if let kind = kinds.first(where: { rest.hasPrefix($0) }) {
+            if let kind = kinds.first(where: { rest.hasPrefix($0) }), !pendingPatrols.isEmpty {
                 let msg = rest.dropFirst(kind.count).trimmingCharacters(in: .whitespaces)
-                history.append(LogEntry(time: time, kind: kind, message: msg, isToday: isToday))
+                pendingPatrols[pendingPatrols.count - 1].events.append(
+                    LogEntry(time: time, kind: kind, message: msg, isToday: isToday))
             }
         }
-        s.history = Array(history.suffix(Config.recentHistory))
-        s.noteworthy = s.history.filter { $0.isNoteworthy }
+        s.patrols = Array(patrols.suffix(Config.recentPatrols))
+        s.noteworthy = s.patrols.filter { $0.isNoteworthy }
     }
 
     private static func firstInteger(in text: String) -> Int? {
@@ -351,9 +363,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         print("  마지막 점검 종료: \(status.lastScanEnd.map(shortTime) ?? "없음")")
         print("  감시 세션 수: \(status.sessionCount.map(String.init) ?? "없음")")
         print("  오늘 조치: \(status.actionsToday)건")
-        print("  순찰 기록 항목: \(status.history.count)건 " +
-              "(오늘 \(status.history.filter { $0.isToday }.count)건, " +
-              "이전 \(status.history.filter { !$0.isToday }.count)건)")
+        print("  순찰 기록 항목: \(status.patrols.count)건 " +
+              "(오늘 \(status.patrols.filter { $0.isToday }.count)건, " +
+              "이전 \(status.patrols.filter { !$0.isToday }.count)건)")
         print("  눈여겨볼 일: \(status.noteworthy.count)건 (순찰 기록의 부분집합)")
         print("  오늘 순찰 횟수: \(status.scansToday)번")
         print("  건강 상태: \(headline())")
@@ -453,24 +465,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        // 한 번 파싱한 동일한 로그 목록을 두 뷰로 보여 준다. 순찰 기록은 전체 시간축,
-        // 눈여겨볼 일은 그중 SCAN이 아닌 예외 이벤트만 거른 부분집합이다.
+        // 로그는 한 번만 파싱한다. 순찰 기록은 완료된 순찰 전체이고, 눈여겨볼 일은
+        // 예외 이벤트가 들어 있던 바로 그 순찰 행만 다시 고른 부분집합이다.
         addHeader("🐾  순찰 기록")
-        if status.history.isEmpty {
+        if status.patrols.isEmpty {
             addRow("🌙", "", "아직 순찰 기록이 없어요")
         } else {
             // 컴퓨터를 꺼 두면 그 사이에는 순찰이 아예 돌지 않는다. 줄을 그냥 이어 붙이면
             // 몇 시간이 통째로 빠진 자리가 10분 간격처럼 보이므로, 빈 구간을 눈에 보이게 적는다.
-            if let newest = status.history.last, let text = gapText(from: newest.time, to: Date()) {
+            if let newest = status.patrols.last, let text = gapText(from: newest.time, to: Date()) {
                 addGapLine("\(text) 지금까지")
             }
             var newer: Date?
-            for entry in status.history.reversed() {
-                if let next = newer, let text = gapText(from: entry.time, to: next) {
+            for patrol in status.patrols.reversed() {
+                if let next = newer, let text = gapText(from: patrol.time, to: next) {
                     addGapLine(text)
                 }
-                addLogLine(entry)
-                newer = entry.time
+                addPatrolLine(patrol)
+                newer = patrol.time
             }
         }
 
@@ -480,7 +492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if status.noteworthy.isEmpty {
             addRow("😌", "", "최근에 별일 없었어요")
         } else {
-            for e in status.noteworthy.reversed() { addLogLine(e) }
+            for patrol in status.noteworthy.reversed() { addPatrolLine(patrol) }
         }
 
         // 실제로 무언가를 실행하는 항목이므로 비유를 빼고 하는 일을 그대로 적는다.
@@ -561,16 +573,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item)
     }
 
-    /// 로그 한 줄. 시각과 종류를 등폭으로 맞춰 세로로 정렬되게 한다.
-    private func addLogLine(_ e: LogEntry) {
-        let kind = e.kindLabel.padding(toLength: 6, withPad: " ", startingAt: 0)
-        let stamp = e.isToday ? shortTime(e.time) : dayTime(e.time)
-        let title = "  \(e.icon)  \(stamp)  \(kind)   \(truncate(e.detail, 44))"
+    /// 순찰 한 줄. 이벤트가 있으면 그 최종 상태로, 없으면 세션 수로 요약한다.
+    private func addPatrolLine(_ patrol: PatrolRecord) {
+        let kind = patrol.kindLabel.padding(toLength: 6, withPad: " ", startingAt: 0)
+        let stamp = patrol.isToday ? shortTime(patrol.time) : dayTime(patrol.time)
+        let title = "  \(patrol.icon)  \(stamp)  \(kind)   \(truncate(patrol.detail, 44))"
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.attributedTitle = NSAttributedString(
             string: title,
             attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-                         .foregroundColor: e.isAction ? NSColor.labelColor : NSColor.secondaryLabelColor])
+                         .foregroundColor: patrol.isAction ? NSColor.labelColor : NSColor.secondaryLabelColor])
         item.isEnabled = false
         menu.addItem(item)
     }
