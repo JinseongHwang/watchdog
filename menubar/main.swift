@@ -20,8 +20,7 @@ enum Config {
     static var watchdogScript: URL { home.appendingPathComponent("bin/orca-limit-watchdog.py") }
     static let python = "/usr/bin/python3"
     static let refreshInterval: TimeInterval = 15
-    static let recentScans = 5    // 이상 없이 지나간 순찰 기록
-    static let recentEvents = 5   // 눈여겨볼 일
+    static let recentHistory = 12 // 순찰 기록과 눈여겨볼 일의 공통 원본
 }
 
 // MARK: - 셸 실행
@@ -48,9 +47,21 @@ func shell(_ command: String, timeout: TimeInterval = 10) -> (out: String, statu
 
 struct LogEntry {
     let time: Date
-    let kind: String      // STUCK, MENU, ARMED, WAIT, OK, SKIP, FAIL, WARN
+    let kind: String      // SCAN, STUCK, MENU, ARMED, WAIT, OK, SKIP, FAIL, WARN
     let message: String
     let isToday: Bool
+    let sessions: Int?
+    let actions: Int?
+
+    init(time: Date, kind: String, message: String, isToday: Bool,
+         sessions: Int? = nil, actions: Int? = nil) {
+        self.time = time
+        self.kind = kind
+        self.message = message
+        self.isToday = isToday
+        self.sessions = sessions
+        self.actions = actions
+    }
 
     /// 로그 본문은 "<터미널 이름> — <설명>" 꼴이다. 종류 라벨이 이미 무슨 일인지 말해주므로
     /// 메뉴에는 대상 이름만 보여준다. 자세한 내용은 일지 파일에 그대로 남아 있다.
@@ -64,6 +75,9 @@ struct LogEntry {
 
     var icon: String {
         switch kind {
+        case "SCAN":
+            if (actions ?? 0) > 0 { return "🦴" }
+            return (sessions ?? 0) == 0 ? "🌙" : "🐾"
         case "OK":    return "🦴"   // 구했다, 간식 하나
         case "STUCK": return "🚨"   // 멈춘 세션 발견
         case "MENU":  return "🎯"   // 메뉴에서 골라줌
@@ -77,6 +91,9 @@ struct LogEntry {
     }
     var kindLabel: String {
         switch kind {
+        case "SCAN":
+            if let actions, actions > 0 { return "조치 \(actions)건" }
+            return (sessions ?? 0) == 0 ? "볼 것 없음" : "이상 없음"
         case "OK":    return "구조 완료"
         case "STUCK": return "멈춤 발견"
         case "MENU":  return "메뉴 선택"
@@ -88,26 +105,18 @@ struct LogEntry {
         default:      return kind
         }
     }
-    var isAction: Bool { kind == "OK" || kind == "STUCK" || kind == "MENU" }
-}
-
-/// 10분마다 도는 순찰 한 번의 결과. 아무 일도 없었던 순찰까지 포함한다.
-struct ScanRecord {
-    let time: Date
-    /// 그 순찰이 검사한 Claude 터미널 수. 0이면 볼 것이 없어 그냥 지나간 순찰이다.
-    let sessions: Int
-    let actions: Int
-    let isToday: Bool
-
-    var icon: String {
-        if actions > 0 { return "🦴" }
-        return sessions == 0 ? "🌙" : "🐾"
+    var detail: String {
+        if kind == "SCAN" {
+            guard let sessions, sessions > 0 else { return "" }
+            return "세션 \(sessions)개"
+        }
+        return target
     }
-    var summary: String {
-        if actions > 0 { return "조치 \(actions)건" }
-        return sessions == 0 ? "볼 것 없음" : "이상 없음"
+    var isAction: Bool {
+        kind == "OK" || kind == "STUCK" || kind == "MENU" ||
+        (kind == "SCAN" && (actions ?? 0) > 0)
     }
-    var detail: String { sessions == 0 ? "" : "세션 \(sessions)개" }
+    var isNoteworthy: Bool { kind != "SCAN" }
 }
 
 // MARK: - 수집한 상태
@@ -122,8 +131,8 @@ struct WatchdogStatus {
     var sessionCount: Int?
     var actionsToday = 0
     var scansToday = 0
-    var recent: [LogEntry] = []
-    var scans: [ScanRecord] = []
+    var history: [LogEntry] = []
+    var noteworthy: [LogEntry] = []
     var logFile: URL?
 
     /// 마지막 점검이 주기의 2.5배를 넘겼으면 뭔가 잘못된 것으로 본다.
@@ -136,7 +145,7 @@ struct WatchdogStatus {
     var hasFailure: Bool {
         if let code = lastExitCode, code != 0 { return true }
         let window = Double(intervalSeconds) * 2
-        return recent.contains { $0.kind == "FAIL" && Date().timeIntervalSince($0.time) < window }
+        return noteworthy.contains { $0.kind == "FAIL" && Date().timeIntervalSince($0.time) < window }
     }
     enum Health { case healthy, stopped, warning }
     var health: Health {
@@ -203,8 +212,7 @@ enum StatusReader {
         }
         guard !sources.isEmpty else { return }
 
-        var entries: [LogEntry] = []
-        var scans: [ScanRecord] = []
+        var history: [LogEntry] = []
         var pendingSessions: Int?
         var lines: [String] = []
         for url in sources {
@@ -239,8 +247,8 @@ enum StatusReader {
                 let acted = rest.contains("조치") ? (firstInteger(in: rest) ?? 0) : 0
                 let seen = pendingSessions ?? 0
                 s.sessionCount = seen
-                scans.append(ScanRecord(time: time, sessions: seen,
-                                        actions: acted, isToday: isToday))
+                history.append(LogEntry(time: time, kind: "SCAN", message: "", isToday: isToday,
+                                        sessions: seen, actions: acted))
                 pendingSessions = nil
                 if isToday {
                     s.scansToday += 1
@@ -251,11 +259,11 @@ enum StatusReader {
             let kinds = ["STUCK", "MENU", "ARMED", "WAIT", "OK", "SKIP", "FAIL", "WARN"]
             if let kind = kinds.first(where: { rest.hasPrefix($0) }) {
                 let msg = rest.dropFirst(kind.count).trimmingCharacters(in: .whitespaces)
-                entries.append(LogEntry(time: time, kind: kind, message: msg, isToday: isToday))
+                history.append(LogEntry(time: time, kind: kind, message: msg, isToday: isToday))
             }
         }
-        s.recent = Array(entries.suffix(Config.recentEvents))
-        s.scans = Array(scans.suffix(Config.recentScans))
+        s.history = Array(history.suffix(Config.recentHistory))
+        s.noteworthy = s.history.filter { $0.isNoteworthy }
     }
 
     private static func firstInteger(in text: String) -> Int? {
@@ -343,11 +351,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         print("  마지막 점검 종료: \(status.lastScanEnd.map(shortTime) ?? "없음")")
         print("  감시 세션 수: \(status.sessionCount.map(String.init) ?? "없음")")
         print("  오늘 조치: \(status.actionsToday)건")
-        print("  최근 로그 항목: \(status.recent.count)건 " +
-              "(오늘 \(status.recent.filter { $0.isToday }.count)건, " +
-              "이전 \(status.recent.filter { !$0.isToday }.count)건)")
+        print("  순찰 기록 항목: \(status.history.count)건 " +
+              "(오늘 \(status.history.filter { $0.isToday }.count)건, " +
+              "이전 \(status.history.filter { !$0.isToday }.count)건)")
+        print("  눈여겨볼 일: \(status.noteworthy.count)건 (순찰 기록의 부분집합)")
         print("  오늘 순찰 횟수: \(status.scansToday)번")
-        print("  순찰 기록 항목: \(status.scans.count)건")
         print("  건강 상태: \(headline())")
         print("  로그 파일: \(status.logFile?.lastPathComponent ?? "없음")")
         // 갓 설치해서 아직 한 번도 안 돌았으면 로그가 없는 게 정상이다. 실패가 아니라 안내로 다룬다.
@@ -445,35 +453,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        // 최근 활동을 하위 메뉴로 감추지 않고 바로 펼쳐 보여준다.
-        // 로그를 두 갈래로 나눈다. 10분마다 조용히 지나간 순찰과, 눈여겨봐야 할 일이다.
-        // 섞어 놓으면 정상 순찰에 묻혀서 정작 봐야 할 것이 안 보인다.
+        // 한 번 파싱한 동일한 로그 목록을 두 뷰로 보여 준다. 순찰 기록은 전체 시간축,
+        // 눈여겨볼 일은 그중 SCAN이 아닌 예외 이벤트만 거른 부분집합이다.
         addHeader("🐾  순찰 기록")
-        if status.scans.isEmpty {
+        if status.history.isEmpty {
             addRow("🌙", "", "아직 순찰 기록이 없어요")
         } else {
             // 컴퓨터를 꺼 두면 그 사이에는 순찰이 아예 돌지 않는다. 줄을 그냥 이어 붙이면
             // 몇 시간이 통째로 빠진 자리가 10분 간격처럼 보이므로, 빈 구간을 눈에 보이게 적는다.
-            if let newest = status.scans.last, let text = gapText(from: newest.time, to: Date()) {
+            if let newest = status.history.last, let text = gapText(from: newest.time, to: Date()) {
                 addGapLine("\(text) 지금까지")
             }
             var newer: Date?
-            for r in status.scans.reversed() {
-                if let next = newer, let text = gapText(from: r.time, to: next) {
+            for entry in status.history.reversed() {
+                if let next = newer, let text = gapText(from: entry.time, to: next) {
                     addGapLine(text)
                 }
-                addScanLine(r)
-                newer = r.time
+                addLogLine(entry)
+                newer = entry.time
             }
         }
 
         menu.addItem(.separator())
 
         addHeader("🔔  눈여겨볼 일")
-        if status.recent.isEmpty {
+        if status.noteworthy.isEmpty {
             addRow("😌", "", "최근에 별일 없었어요")
         } else {
-            for e in status.recent.reversed() { addLogLine(e) }
+            for e in status.noteworthy.reversed() { addLogLine(e) }
         }
 
         // 실제로 무언가를 실행하는 항목이므로 비유를 빼고 하는 일을 그대로 적는다.
@@ -558,7 +565,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func addLogLine(_ e: LogEntry) {
         let kind = e.kindLabel.padding(toLength: 6, withPad: " ", startingAt: 0)
         let stamp = e.isToday ? shortTime(e.time) : dayTime(e.time)
-        let title = "  \(e.icon)  \(stamp)  \(kind)   \(truncate(e.target, 44))"
+        let title = "  \(e.icon)  \(stamp)  \(kind)   \(truncate(e.detail, 44))"
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.attributedTitle = NSAttributedString(
             string: title,
@@ -582,20 +589,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             string: title,
             attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
                          .foregroundColor: NSColor.tertiaryLabelColor])
-        item.isEnabled = false
-        menu.addItem(item)
-    }
-
-    /// 순찰 한 줄. 조치가 있었던 순찰은 아이콘과 요약이 달라진다.
-    private func addScanLine(_ r: ScanRecord) {
-        let stamp = r.isToday ? shortTime(r.time) : dayTime(r.time)
-        let summary = r.summary.padding(toLength: 7, withPad: " ", startingAt: 0)
-        let title = "  \(r.icon)  \(stamp)  \(summary)  \(r.detail)"
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        item.attributedTitle = NSAttributedString(
-            string: title,
-            attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-                         .foregroundColor: r.actions > 0 ? NSColor.labelColor : NSColor.secondaryLabelColor])
         item.isEnabled = false
         menu.addItem(item)
     }
