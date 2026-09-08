@@ -17,6 +17,9 @@ TERMINAL="${ORCA_TERMINAL_HANDLE:-}"
 TEXT="continue"
 DRY_RUN=0
 FORCE=0
+# launchd 는 대화형 셸의 PATH를 물려받지 않는다. 감지 본체와 같은 절대 경로를 써야
+# 메뉴바/launchd 순찰에서도 terminal show·send가 실제 Orca CLI를 실행한다.
+ORCA="${ORCA_BIN:-/usr/local/bin/orca}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -38,7 +41,7 @@ log() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*"; }
 
 # 화면(rendered screen)에서 draft 필드만 뽑는다.
 read_draft() {
-  orca terminal read --terminal "$TERMINAL" --screen --json 2>/dev/null \
+  "$ORCA" terminal read --terminal "$TERMINAL" --screen --json 2>/dev/null \
     | python3 -c 'import sys,json
 try:
     t=json.load(sys.stdin)["result"]["terminal"]
@@ -50,7 +53,7 @@ print(d if d else "")'
 
 # 화면 전체 텍스트
 read_screen() {
-  orca terminal read --terminal "$TERMINAL" --screen --json 2>/dev/null \
+  "$ORCA" terminal read --terminal "$TERMINAL" --screen --json 2>/dev/null \
     | python3 -c 'import sys,json
 try:
     t=json.load(sys.stdin)["result"]["terminal"]
@@ -65,7 +68,7 @@ clear_draft() {
   local n=$1 bs=""
   local i
   for ((i=0;i<n+8;i++)); do bs+=$'\177'; done
-  orca terminal send --terminal "$TERMINAL" --text "$bs" >/dev/null 2>&1
+  "$ORCA" terminal send --terminal "$TERMINAL" --text "$bs" >/dev/null 2>&1
 }
 
 log "대상 터미널: $TERMINAL"
@@ -73,7 +76,7 @@ log "대상 터미널: $TERMINAL"
 # 1) 터미널이 살아 있고 쓰기 가능한지 확인.
 #    조회는 앱이 바쁠 때 간헐적으로 빈 응답을 주므로 한 번 더 시도한다.
 probe_terminal() {
-  orca terminal show --terminal "$TERMINAL" --json 2>/dev/null \
+  "$ORCA" terminal show --terminal "$TERMINAL" --json 2>/dev/null \
     | python3 -c 'import sys,json
 try:
     t=json.load(sys.stdin)["result"]["terminal"]
@@ -110,7 +113,7 @@ fi
 log "컴포저 비어 있음 확인"
 
 # 3) 텍스트 주입
-orca terminal send --terminal "$TERMINAL" --text "$TEXT" >/dev/null 2>&1 || {
+"$ORCA" terminal send --terminal "$TERMINAL" --text "$TEXT" >/dev/null 2>&1 || {
   echo "FAIL: 텍스트 전송 실패" >&2; exit 1; }
 sleep 1
 AFTER="$(read_draft)"
@@ -135,7 +138,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 
 # 5) 엔터로 제출
-orca terminal send --terminal "$TERMINAL" --enter >/dev/null 2>&1 || {
+"$ORCA" terminal send --terminal "$TERMINAL" --enter >/dev/null 2>&1 || {
   echo "FAIL: 엔터 전송 실패" >&2; exit 1; }
 sleep 2
 
