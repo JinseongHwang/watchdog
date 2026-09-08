@@ -2,6 +2,9 @@
 logs/
 state.json
 
+# 에이전트 도구가 만드는 작업 상태
+.omc/
+
 # 빌드 산출물
 bin/watchdog-menubar
 *.o
