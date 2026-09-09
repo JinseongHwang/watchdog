@@ -1,0 +1,13 @@
+⏺ Dynamic workflow "나락 감지기 구현 설계 문서" completed · 59m 53s
+  ⎿  조사와 검증을 마쳤습니다.
+✻ Waiting for 1 dynamic workflow to finish
+❯ 이어서 검토해.
+⏺ 결과를 바탕으로 다음 내용을 살펴보겠습니다.
+  - 근거 게이트를 먼저 확인합니다.
+  - 화면 흐름을 점검합니다.
+❯ 계속해
+  ⎿  You've hit your session limit · resets 3:40am (Asia/Seoul)
+     /upgrade to increase your usage limit.
+✻ Brewed for 0s · done 8:48 PM
+────────────────────────────────────────
+❯

@@ -78,6 +78,9 @@ MENU_AUTO_RESUME = "Wait here, then continue automatically"
 # 그래서 화면 아래쪽 구간에서, 배너꼴로 생긴 줄만 표지로 인정한다.
 TAIL_REGION_LINES = 15
 BANNER_MAX_LENGTH = 120
+# 동적 워크플로 완료 뒤 사용자가 후속 프롬프트를 보내면, 새 한도 배너는 하단에 남지만
+# 완료 상태 줄은 조금 위로 밀린다. 상태 문맥은 넓게 보되 배너 자신은 계속 하단만 본다.
+WORKFLOW_CONTEXT_LINES = 60
 
 # 줄 맨 앞에 붙는 상태 글리프. 배너 본문을 꺼내려면 떼어내야 한다.
 BANNER_LEAD_GLYPHS = "✗✳✻⚠❗•▪●○◆◇· \t"
@@ -189,12 +192,21 @@ def starts_with_marker(bodies: list[str], markers: tuple[str, ...]) -> bool:
 def workflow_limit_bodies(screen: str) -> list[str]:
     """Claude Code 작업 상태 트리에 붙는 실제 한도 배너 본문만 돌려준다.
 
-    `⎿`는 일반 대화 인용에도 쓰이므로 단독으로 신뢰하지 않는다.
-    바로 위의 workflow 상태와 다음 줄의 업그레이드 안내가 모두 맞을 때만 허용한다.
+    `⎿`는 일반 대화 인용에도 쓰이므로 단독으로 신뢰하지 않는다. 배너는 화면 아래쪽에
+    있고 바로 다음 줄이 업그레이드 안내여야 하며, 가까운 화면 문맥에 실제 workflow
+    완료 상태가 있어야만 허용한다. 완료 뒤 사용자가 후속 프롬프트를 보낸 경우에도
+    workflow 상태 줄이 배너 바로 위에 있지는 않을 수 있다.
     """
-    lines = screen.splitlines()[-TAIL_REGION_LINES:]
+    lines = screen.splitlines()[-WORKFLOW_CONTEXT_LINES:]
+    tail_start = max(0, len(lines) - TAIL_REGION_LINES)
+    has_workflow_context = any(WORKFLOW_STATUS_RE.match(raw.strip()) for raw in lines)
+    if not has_workflow_context:
+        return []
+
     bodies = []
     for idx, raw in enumerate(lines):
+        if idx < tail_start:
+            continue
         line = raw.strip()
         if not line.startswith(("⎿", "└")):
             continue
@@ -202,9 +214,8 @@ def workflow_limit_bodies(screen: str) -> list[str]:
         if not body.startswith(WORKFLOW_SESSION_LIMIT_MARKER):
             continue
 
-        previous = next((item.strip() for item in reversed(lines[:idx]) if item.strip()), "")
         following = next((item.strip() for item in lines[idx + 1:] if item.strip()), "")
-        if WORKFLOW_STATUS_RE.match(previous) and following.startswith(WORKFLOW_UPGRADE_HINT):
+        if following.startswith(WORKFLOW_UPGRADE_HINT):
             bodies.append(body)
     return bodies
 

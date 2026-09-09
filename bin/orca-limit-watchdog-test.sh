@@ -65,6 +65,8 @@ sed "s/3:40am/$(rel_time 90)/" "$FIX/claude-dynamic-workflow-limit.txt" > "$TMP/
 sed "s/3:40am/$(rel_time -90)/" "$FIX/claude-dynamic-workflow-limit.txt" > "$TMP/workflow-past.txt"
 check "워크플로 재설정 전이면 기록하고 기다림" "$TMP/workflow-future.txt" WAIT
 check "워크플로 재설정 후면 재개"   "$TMP/workflow-past.txt"   STUCK
+sed "s/3:40am/$(rel_time -90)/" "$FIX/claude-dynamic-workflow-followup-limit.txt" > "$TMP/workflow-followup-past.txt"
+check "워크플로 후속 프롬프트 뒤 한도도 재개" "$TMP/workflow-followup-past.txt" STUCK
 
 echo
 echo "합계: PASS=$PASS FAIL=$FAIL"
