@@ -78,9 +78,6 @@ MENU_AUTO_RESUME = "Wait here, then continue automatically"
 # 그래서 화면 아래쪽 구간에서, 배너꼴로 생긴 줄만 표지로 인정한다.
 TAIL_REGION_LINES = 15
 BANNER_MAX_LENGTH = 120
-# 동적 워크플로 완료 뒤 사용자가 후속 프롬프트를 보내면, 새 한도 배너는 하단에 남지만
-# 완료 상태 줄은 조금 위로 밀린다. 상태 문맥은 넓게 보되 배너 자신은 계속 하단만 본다.
-WORKFLOW_CONTEXT_LINES = 60
 
 # 줄 맨 앞에 붙는 상태 글리프. 배너 본문을 꺼내려면 떼어내야 한다.
 BANNER_LEAD_GLYPHS = "✗✳✻⚠❗•▪●○◆◇· \t"
@@ -193,20 +190,14 @@ def workflow_limit_bodies(screen: str) -> list[str]:
     """Claude Code 작업 상태 트리에 붙는 실제 한도 배너 본문만 돌려준다.
 
     `⎿`는 일반 대화 인용에도 쓰이므로 단독으로 신뢰하지 않는다. 배너는 화면 아래쪽에
-    있고 바로 다음 줄이 업그레이드 안내여야 하며, 가까운 화면 문맥에 실제 workflow
-    완료 상태가 있어야만 허용한다. 완료 뒤 사용자가 후속 프롬프트를 보낸 경우에도
-    workflow 상태 줄이 배너 바로 위에 있지는 않을 수 있다.
+    있고 바로 다음 줄이 업그레이드 안내여야 한다. 직전 줄이 실제 workflow 완료 상태거나
+    사용자가 방금 보낸 프롬프트일 때만 허용한다. 후자의 경우는 한도에 걸린 뒤 사용자가
+    다시 요청했을 때 Claude Code가 내는 실제 배너 모양으로, 이전 workflow 완료 줄이
+    화면에서 밀려나도 다음 순찰이 자동 재개할 수 있게 한다.
     """
-    lines = screen.splitlines()[-WORKFLOW_CONTEXT_LINES:]
-    tail_start = max(0, len(lines) - TAIL_REGION_LINES)
-    has_workflow_context = any(WORKFLOW_STATUS_RE.match(raw.strip()) for raw in lines)
-    if not has_workflow_context:
-        return []
-
+    lines = screen.splitlines()[-TAIL_REGION_LINES:]
     bodies = []
     for idx, raw in enumerate(lines):
-        if idx < tail_start:
-            continue
         line = raw.strip()
         if not line.startswith(("⎿", "└")):
             continue
@@ -214,8 +205,11 @@ def workflow_limit_bodies(screen: str) -> list[str]:
         if not body.startswith(WORKFLOW_SESSION_LIMIT_MARKER):
             continue
 
+        previous = next((item.strip() for item in reversed(lines[:idx]) if item.strip()), "")
         following = next((item.strip() for item in lines[idx + 1:] if item.strip()), "")
-        if following.startswith(WORKFLOW_UPGRADE_HINT):
+        follows_workflow = WORKFLOW_STATUS_RE.match(previous) is not None
+        follows_user_prompt = previous.startswith("❯") and len(previous) > 1
+        if following.startswith(WORKFLOW_UPGRADE_HINT) and (follows_workflow or follows_user_prompt):
             bodies.append(body)
     return bodies
 
