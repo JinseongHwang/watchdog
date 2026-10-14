@@ -19,7 +19,15 @@ DRY_RUN=0
 FORCE=0
 # launchd 는 대화형 셸의 PATH를 물려받지 않는다. 감지 본체와 같은 절대 경로를 써야
 # 메뉴바/launchd 순찰에서도 terminal show·send가 실제 Orca CLI를 실행한다.
-ORCA="${ORCA_BIN:-/usr/local/bin/orca}"
+if [ -n "${ORCA_BIN:-}" ]; then
+  ORCA="$ORCA_BIN"
+elif command -v orca >/dev/null 2>&1; then
+  ORCA="$(command -v orca)"
+elif [ -x /Applications/Orca.app/Contents/Resources/bin/orca ]; then
+  ORCA=/Applications/Orca.app/Contents/Resources/bin/orca
+else
+  ORCA=/usr/local/bin/orca
+fi
 
 while [ $# -gt 0 ]; do
   case "$1" in

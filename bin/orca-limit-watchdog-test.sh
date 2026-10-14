@@ -6,7 +6,8 @@
 # 시각에 의존하는 항목은 실행 시점 기준으로 픽스처를 생성해 언제 돌려도 결과가 같다.
 
 set -uo pipefail
-WD_HOME="${WATCHDOG_HOME:-$HOME/watchdog}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WD_HOME="${WATCHDOG_HOME:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 WD="$WD_HOME/bin/orca-limit-watchdog.py"
 FIX="$WD_HOME/fixtures"
 TMP="$(mktemp -d)"
@@ -37,7 +38,7 @@ print(t.strftime('%-I:%M%p').lower())
 
 echo "== 기본 상태 판정 =="
 check "한도에 걸려 멈춤"            "$FIX/stuck.txt"            STUCK
-check "자동 재개 예약됨"            "$FIX/armed.txt"            ARMED
+check "자동 재개 예약됨도 재개 대상" "$FIX/armed.txt"            STUCK
 check "옵션 메뉴 떠 있음"           "$FIX/menu.txt"             MENU
 check "자동 재개 취소됨"            "$FIX/cancelled.txt"        STUCK
 check "평범한 유휴"                 "$FIX/idle.txt"             NONE

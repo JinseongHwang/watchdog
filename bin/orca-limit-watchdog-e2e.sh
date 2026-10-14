@@ -7,9 +7,18 @@
 # 화면의 배너를 누가 그렸는지만 다르다.
 
 set -uo pipefail
-WD_HOME="${WATCHDOG_HOME:-$HOME/watchdog}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WD_HOME="${WATCHDOG_HOME:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 WD="$WD_HOME/bin/orca-limit-watchdog.py"
-ORCA="${ORCA_BIN:-/usr/local/bin/orca}"
+if [ -n "${ORCA_BIN:-}" ]; then
+  ORCA="$ORCA_BIN"
+elif command -v orca >/dev/null 2>&1; then
+  ORCA="$(command -v orca)"
+elif [ -x /Applications/Orca.app/Contents/Resources/bin/orca ]; then
+  ORCA=/Applications/Orca.app/Contents/Resources/bin/orca
+else
+  ORCA=/usr/local/bin/orca
+fi
 WORKTREE="${1:-path:$HOME/blog}"
 BANNER="Usage limit reached"
 HANDLE=""
@@ -46,11 +55,19 @@ fail() { echo "FAIL: $*"; FAILED=1; }
 
 echo "1) 테스트용 Claude 세션을 띄웁니다"
 HANDLE=$("$ORCA" terminal create --worktree "$WORKTREE" --title "WATCHDOG-E2E" \
-  --command "claude --model haiku" --json 2>/dev/null \
+  --command "claude --model haiku --dangerously-skip-permissions" --json 2>/dev/null \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["terminal"]["handle"])')
 [ -z "$HANDLE" ] && { echo "FAIL: 터미널 생성 실패"; exit 1; }
 echo "   터미널: $HANDLE"
-wait_for "$HANDLE" "❯" 40 || { echo "FAIL: 세션이 뜨지 않았습니다"; exit 1; }
+# 새 worktree에서는 Claude Code가 최초 한 번 신뢰 확인을 띄울 수 있다.
+# 테스트가 그 메뉴의 첫 `❯`를 준비 완료로 오인하지 않도록 명시적으로 신뢰를 선택한다.
+if wait_for "$HANDLE" "Yes, I trust this folder" 12; then
+  "$ORCA" terminal send --terminal "$HANDLE" --text $'\033[B' >/dev/null 2>&1
+  sleep 1
+  "$ORCA" terminal send --terminal "$HANDLE" --enter >/dev/null 2>&1
+fi
+# Claude Code 버전에 따라 하단 도움말은 달라진다. 권한 모드 표시는 모두 준비된 입력창에만 나온다.
+wait_for "$HANDLE" "bypass permissions on" 40 || { echo "FAIL: 세션이 뜨지 않았습니다"; exit 1; }
 echo "   세션 준비 완료"
 
 echo

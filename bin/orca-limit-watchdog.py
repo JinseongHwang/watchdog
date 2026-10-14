@@ -3,8 +3,7 @@
 
 한 번 실행하면 살아 있는 모든 Claude 터미널을 한 바퀴 훑고 끝난다. 주기 실행은 launchd 가 맡는다.
 
-감지 결과는 다섯 가지다.
-  ARMED  Claude Code 가 이미 자동 재개를 예약해 둔 상태다. 건드리지 않는다.
+감지 결과는 네 가지다.
   MENU   한도 옵션 메뉴가 떠 있다. "Wait here, then continue automatically" 항목을 골라준다.
   STUCK  한도에 걸린 채 아무 예약 없이 멈춰 있다. 프롬프트를 넣어 재개시킨다.
   WAIT   한도는 감지됐지만 아직 재설정 전이다. 시각을 기록하고 기다린다.
@@ -18,13 +17,27 @@ import fcntl
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-ORCA = os.environ.get("ORCA_BIN", "/usr/local/bin/orca")
+def find_orca() -> str:
+    """launchd 환경에서도 설치된 Orca CLI를 찾는다."""
+    if configured := os.environ.get("ORCA_BIN"):
+        return configured
+    if discovered := shutil.which("orca"):
+        return discovered
+    bundled = "/Applications/Orca.app/Contents/Resources/bin/orca"
+    if os.path.isfile(bundled) and os.access(bundled, os.X_OK):
+        return bundled
+    # 기존 설치 경로도 마지막 후보로 유지한다. 실행 실패는 로그에 남는다.
+    return "/usr/local/bin/orca"
+
+
+ORCA = find_orca()
 
 # 런타임 일체를 홈 아래 watchdog 디렉터리에 모은다.
 HOME_DIR = Path(os.environ.get("WATCHDOG_HOME", os.path.expanduser("~/watchdog")))
@@ -53,16 +66,6 @@ WORKFLOW_SESSION_LIMIT_MARKER = "You've hit your session limit"
 WORKFLOW_UPGRADE_HINT = "/upgrade to increase your usage limit."
 WORKFLOW_STATUS_RE = re.compile(
     r"^[●•⏺]\s+Dynamic workflow\b.*\b(?:completed|failed|stopped)\b", re.IGNORECASE,
-)
-
-# Claude Code 가 이미 알아서 이어가기로 예약해 둔 상태의 표지.
-ARMED_MARKERS = (
-    "continuing automatically",
-    "Continuing automatically at",
-    "Continuing automatically when your limit resets",
-    "Continuing shortly",
-    "Claude Code will continue automatically",
-    "Usage limit reset",
 )
 
 # 자동 재개가 취소되어 사람 손을 기다리는 상태의 표지.
@@ -243,10 +246,6 @@ def classify(screen: str, draft: str) -> tuple[str, dict]:
     if not (has_limit or has_cancelled):
         return "NONE", info
 
-    # 이미 자동 재개가 예약돼 있으면 그대로 둔다.
-    if any(m in screen for m in ARMED_MARKERS) and not has_cancelled:
-        return "ARMED", info
-
     # 사용자가 입력 중이면 절대 덮어쓰지 않는다.
     if draft and draft not in BUSY_MARKERS:
         info["reason"] = f"컴포저에 초안이 있음: {draft[:40]!r}"
@@ -311,6 +310,13 @@ def load_state() -> dict:
 def save_state(state: dict) -> None:
     HOME_DIR.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def resume_is_safe(screen: str, draft: str) -> bool:
+    """재설정 후 보류된 continue를 보내도 되는지 확인한다."""
+    if draft and draft not in BUSY_MARKERS:
+        return False
+    return not any(marker in screen for marker in BUSY_MARKERS if marker != "Press up to edit queued messages")
 
 
 def claude_terminals(only: str | None) -> list[dict]:
@@ -414,6 +420,7 @@ def run_patrol(args: argparse.Namespace) -> int:
     state = load_state()
     now = time.time()
     acted = 0
+    state_changed = False
 
     for t in terminals:
         handle = t["handle"]
@@ -422,14 +429,29 @@ def run_patrol(args: argparse.Namespace) -> int:
             continue
         verdict, info = classify(screen, draft)
         label = t.get("title") or t.get("worktreePath") or handle
+        pending_reset = state.get(handle, {}).get("pending_reset_at")
+
+        # 한도를 봤던 세션은 재설정 시각을 기억한다. 재설정 뒤에는 Claude의 배너가
+        # 사라졌더라도 한 번 continue를 시도한다. 이미 작업 중이거나 사용자가 초안을
+        # 쓰는 경우만 다음 순찰로 미룬다.
+        if pending_reset:
+            try:
+                reset_at = datetime.fromisoformat(pending_reset)
+            except ValueError:
+                state[handle].pop("pending_reset_at", None)
+                state_changed = True
+            else:
+                if datetime.now() >= reset_at and resume_is_safe(screen, draft):
+                    verdict = "STUCK"
+                    info = {"reason": f"한도 대기 기록의 재설정 시각({reset_at:%H:%M})이 지남"}
 
         if verdict == "NONE":
             continue
         if verdict == "WAIT":
             log(f"WAIT   {label} — {info['reason']}. 재설정 뒤 다음 순찰에서 재개합니다.")
-            continue
-        if verdict == "ARMED":
-            log(f"ARMED  {label} — Claude Code 가 이미 자동 재개를 예약해 두었습니다. 넘어갑니다.")
+            state.setdefault(handle, {})["pending_reset_at"] = info["reset_at"]
+            state[handle]["label"] = label
+            state_changed = True
             continue
 
         last = state.get(handle, {}).get("last_fired", 0)
@@ -452,12 +474,14 @@ def run_patrol(args: argparse.Namespace) -> int:
         elif ok and not args.dry_run:
             state.setdefault(handle, {})["last_fired"] = now
             state[handle]["label"] = label
+            state[handle].pop("pending_reset_at", None)
+            state_changed = True
             acted += 1
             log(f"OK     {label} — 재개 조치를 마쳤습니다.")
         elif not ok:
             log(f"FAIL   {label} — 재개 조치에 실패했습니다.")
 
-    if acted:
+    if acted or state_changed:
         save_state(state)
     log(f"점검 완료 — 조치 {acted}건")
     return 0

@@ -8,6 +8,10 @@ LABEL="com.jinseonghwang.orca-limit-watchdog"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 INTERVAL=600
 PYTHON=/usr/bin/python3
+ORCA_BIN="${ORCA_BIN:-$(command -v orca 2>/dev/null || true)}"
+if [ -z "$ORCA_BIN" ] && [ -x /Applications/Orca.app/Contents/Resources/bin/orca ]; then
+  ORCA_BIN=/Applications/Orca.app/Contents/Resources/bin/orca
+fi
 
 MENUBAR_LABEL="com.jinseonghwang.orca-limit-watchdog-menubar"
 MENUBAR_PLIST="$HOME/Library/LaunchAgents/$MENUBAR_LABEL.plist"
@@ -37,7 +41,10 @@ cat > "$PLIST" <<PLISTEOF
     <string>$WD_HOME/bin/orca-limit-watchdog.py</string>
   </array>
   <key>EnvironmentVariables</key>
-  <dict><key>WATCHDOG_HOME</key><string>$WD_HOME</string></dict>
+  <dict>
+    <key>WATCHDOG_HOME</key><string>$WD_HOME</string>
+    <key>ORCA_BIN</key><string>$ORCA_BIN</string>
+  </dict>
   <key>StartInterval</key><integer>$INTERVAL</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>$WD_HOME/logs/launchd.log</string>
