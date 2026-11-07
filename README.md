@@ -17,12 +17,14 @@ Orca에서 돌아가는 Claude Code 세션이 5시간 사용량 한도에 걸려
 ## 설치
 
 ```bash
-git clone git@github.com:JinseongHwang/watchdog.git ~/Projects/watchdog
-~/Projects/watchdog/bin/install.sh
+git clone git@github.com:JinseongHwang/watchdog.git   # 원하는 위치 어디든 괜찮아요
+cd watchdog
+./bin/install.sh
 ```
 
-`install.sh` 는 메뉴바 앱을 빌드하고 launchd 서비스 두 개를 등록합니다. 다른 위치에
-두고 싶으면 `WATCHDOG_HOME` 환경 변수로 경로를 지정하세요.
+`install.sh` 는 메뉴바 앱을 빌드하고 launchd 서비스 두 개를 등록합니다. 로그와 상태 파일은
+clone 한 폴더 안에 생깁니다. 저장소와 다른 곳에 두고 싶으면 `WATCHDOG_HOME` 환경 변수로
+경로를 지정하세요.
 
 ## 왜 Orca가 필요한가
 
@@ -150,7 +152,7 @@ launchd 순찰과 메뉴의 수동 점검이 겹치면 같은 세션을 두 번 
 갓 설치해서 아직 순찰 기록이 없으면 실패가 아니라 참고 문구로 알려줍니다.
 
 ```bash
-~/Projects/watchdog/bin/watchdog-menubar --selftest
+./bin/watchdog-menubar --selftest
 ```
 
 ## 디렉터리 구조
@@ -185,18 +187,20 @@ state.json                            터미널별 마지막 발동 시각
 
 ## 사용법
 
+아래 명령은 clone 한 폴더(저장소 루트)에서 실행하는 기준입니다.
+
 ```bash
-~/Projects/watchdog/bin/install.sh --interval 300    # 점검 주기를 바꿀 때
-~/Projects/watchdog/bin/install.sh --uninstall       # 서비스를 모두 내릴 때
+./bin/install.sh --interval 300    # 점검 주기를 바꿀 때
+./bin/install.sh --uninstall       # 서비스를 모두 내릴 때
 
 # 지금 한 번 돌려보기. 감지만 하고 아무것도 보내지 않습니다.
-/usr/bin/python3 ~/Projects/watchdog/bin/orca-limit-watchdog.py --dry-run
+/usr/bin/python3 ./bin/orca-limit-watchdog.py --dry-run
 
 # 로그 확인
-tail -f ~/Projects/watchdog/logs/watchdog-$(date +%F).log
+tail -f ./logs/watchdog-$(date +%F).log
 
 # 특정 세션에 프롬프트를 직접 넣기
-~/Projects/watchdog/bin/orca-send-prompt.sh --terminal term_xxxx --text "continue"
+./bin/orca-send-prompt.sh --terminal term_xxxx --text "continue"
 ```
 
 주요 옵션입니다.
@@ -211,8 +215,8 @@ tail -f ~/Projects/watchdog/logs/watchdog-$(date +%F).log
 진짜 5시간 한도는 원할 때 만들 수 없습니다. 그래서 두 층으로 나눠서 검증했어요.
 
 ```bash
-~/Projects/watchdog/bin/orca-limit-watchdog-test.sh   # 판정 로직 17건
-~/Projects/watchdog/bin/orca-limit-watchdog-e2e.sh    # 실제 Claude 세션 종단 6단계
+./bin/orca-limit-watchdog-test.sh   # 판정 로직 17건
+./bin/orca-limit-watchdog-e2e.sh    # 실제 Claude 세션 종단 6단계
 ```
 
 단위 테스트는 Claude Code 바이너리에서 그대로 추출한 문구로 화면 픽스처를 만들어 판정

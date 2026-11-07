@@ -39,8 +39,8 @@ def find_orca() -> str:
 
 ORCA = find_orca()
 
-# 런타임 일체를 ~/Projects/watchdog 디렉터리에 모은다.
-HOME_DIR = Path(os.environ.get("WATCHDOG_HOME", os.path.expanduser("~/Projects/watchdog")))
+# 런타임 일체를 저장소 디렉터리(이 스크립트의 상위 폴더)에 모은다. 필요하면 WATCHDOG_HOME 으로 바꾼다.
+HOME_DIR = Path(os.environ.get("WATCHDOG_HOME") or Path(__file__).resolve().parent.parent)
 BIN_DIR = HOME_DIR / "bin"
 LOG_DIR = HOME_DIR / "logs"
 SENDER = str(BIN_DIR / "orca-send-prompt.sh")

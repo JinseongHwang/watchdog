@@ -1,7 +1,7 @@
 // Orca 한도 워치독의 상태를 macOS 메뉴바에 띄우는 앱.
 //
 // 의존성 없이 AppKit 만 쓴다. launchctl 로 launchd 등록 상태를 읽고,
-// ~/Projects/watchdog/logs 의 오늘 로그를 파싱해 최근 활동을 보여준다.
+// <저장소>/logs 의 오늘 로그를 파싱해 최근 활동을 보여준다.
 
 import AppKit
 import Foundation
@@ -14,7 +14,9 @@ enum Config {
         if let override = ProcessInfo.processInfo.environment["WATCHDOG_HOME"] {
             return URL(fileURLWithPath: override)
         }
-        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Projects/watchdog")
+        // 기본값은 실행 파일(<저장소>/bin/watchdog-menubar)의 상위 저장소 폴더다.
+        let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        return exe.deletingLastPathComponent().deletingLastPathComponent()
     }()
     static var logsDir: URL { home.appendingPathComponent("logs") }
     static var watchdogScript: URL { home.appendingPathComponent("bin/orca-limit-watchdog.py") }

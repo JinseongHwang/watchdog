@@ -3,7 +3,9 @@
 # 사용법: install.sh [--interval <초>] | install.sh --uninstall
 
 set -euo pipefail
-WD_HOME="${WATCHDOG_HOME:-$HOME/Projects/watchdog}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 기본값은 이 스크립트가 들어 있는 저장소 위치다. clone 한 경로가 어디든 그 안에서 모두 관리한다.
+WD_HOME="${WATCHDOG_HOME:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 LABEL="com.jinseonghwang.orca-limit-watchdog"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 INTERVAL=600
