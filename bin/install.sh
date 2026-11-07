@@ -3,7 +3,7 @@
 # 사용법: install.sh [--interval <초>] | install.sh --uninstall
 
 set -euo pipefail
-WD_HOME="${WATCHDOG_HOME:-$HOME/watchdog}"
+WD_HOME="${WATCHDOG_HOME:-$HOME/Projects/watchdog}"
 LABEL="com.jinseonghwang.orca-limit-watchdog"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 INTERVAL=600
